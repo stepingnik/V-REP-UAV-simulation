@@ -1,0 +1,532 @@
+function sysCall_init() 
+    -- Make sure we have version 2.4.13 or above (the particles are not supported otherwise)
+    v=sim.getInt32Parameter(sim.intparam_program_version)
+    if (v<20413) then
+        sim.displayDialog('Warning','The propeller model is only fully supported from V-REP version 2.4.13 and above.&&nThis simulation will not run as expected!',sim.dlgstyle_ok,false,'',nil,{0.8,0,0,0,0,0})
+    end
+
+    -- Detatch the manipulation sphere:
+    targetObj=sim.getObjectHandle('Quadricopter_target')
+    sim.setObjectParent(targetObj,-1,true)
+
+    -- This control algo was quickly written and is dirty and not optimal. It just serves as a SIMPLE example
+
+    d=sim.getObjectHandle('Quadricopter_base')
+
+    particlesAreVisible=sim.getScriptSimulationParameter(sim.handle_self,'particlesAreVisible')
+    sim.setScriptSimulationParameter(sim.handle_tree,'particlesAreVisible',tostring(particlesAreVisible))
+    simulateParticles=sim.getScriptSimulationParameter(sim.handle_self,'simulateParticles')
+    sim.setScriptSimulationParameter(sim.handle_tree,'simulateParticles',tostring(simulateParticles))
+
+    propellerScripts={-1,-1,-1,-1}
+    for i=1,4,1 do
+        propellerScripts[i]=sim.getScriptHandle('Quadricopter_propeller_respondable'..i)
+    end
+    heli=sim.getObjectAssociatedWithScript(sim.handle_self)
+
+    particlesTargetVelocities={0,0,0,0}
+
+    pParam=2
+    iParam=0
+    dParam=0
+    vParam=-4
+
+    cumul=0
+    lastE=0
+    pAlphaE=0
+    pBetaE=0
+    psp2=0
+    psp1=0
+
+    prevEuler=0
+
+
+    fakeShadow=sim.getScriptSimulationParameter(sim.handle_self,'fakeShadow')
+    if (fakeShadow) then
+        shadowCont=sim.addDrawingObject(sim.drawing_discpoints+sim.drawing_cyclic+sim.drawing_25percenttransparency+sim.drawing_50percenttransparency+sim.drawing_itemsizes,0.2,0,-1,1)
+    end
+
+    -- Prepare 2 floating views with the camera views:
+    floorCam=sim.getObjectHandle('Quadricopter_floorCamera')
+    frontCam=sim.getObjectHandle('Quadricopter_frontCamera')
+    floorView=sim.floatingViewAdd(0.9,0.9,0.2,0.2,0)
+    frontView=sim.floatingViewAdd(0.7,0.9,0.2,0.2,0)
+    sim.adjustView(floorView,floorCam,64)
+    sim.adjustView(frontView,frontCam,64)
+end
+
+function sysCall_cleanup() 
+    sim.removeDrawingObject(shadowCont)
+    sim.floatingViewRemove(floorView)
+    sim.floatingViewRemove(frontView)
+end 
+
+function sysCall_actuation() 
+    s=sim.getObjectSizeFactor(d)
+    
+    pos=sim.getObjectPosition(d,-1)
+    if (fakeShadow) then
+        itemData={pos[1],pos[2],0.002,0,0,1,0.2*s}
+        sim.addDrawingObjectItem(shadowCont,itemData)
+    end
+    
+    -- Vertical control:
+    targetPos=sim.getObjectPosition(targetObj,-1)
+    pos=sim.getObjectPosition(d,-1)
+    l=sim.getVelocity(heli)
+    e=(targetPos[3]-pos[3])
+    cumul=cumul+e
+    pv=pParam*e
+    thrust=5.335+pv+iParam*cumul+dParam*(e-lastE)+l[3]*vParam
+    lastE=e
+    
+    -- Horizontal control: 
+    sp=sim.getObjectPosition(targetObj,d)
+    m=sim.getObjectMatrix(d,-1)
+    vx={1,0,0}
+    vx=sim.multiplyVector(m,vx)
+    vy={0,1,0}
+    vy=sim.multiplyVector(m,vy)
+    alphaE=(vy[3]-m[12])
+    alphaCorr=0.25*alphaE+2.1*(alphaE-pAlphaE)
+    betaE=(vx[3]-m[12])
+    betaCorr=-0.25*betaE-2.1*(betaE-pBetaE)
+    pAlphaE=alphaE
+    pBetaE=betaE
+    alphaCorr=alphaCorr+sp[2]*0.005+1*(sp[2]-psp2)
+    betaCorr=betaCorr-sp[1]*0.005-1*(sp[1]-psp1)
+    psp2=sp[2]
+    psp1=sp[1]
+    
+    -- Rotational control:
+    euler=sim.getObjectOrientation(d,targetObj)
+    rotCorr=euler[3]*0.1+2*(euler[3]-prevEuler)
+    prevEuler=euler[3]
+    
+    -- Decide of the motor velocities:
+    particlesTargetVelocities[1]=thrust*(1-alphaCorr+betaCorr+rotCorr)
+    particlesTargetVelocities[2]=thrust*(1-alphaCorr-betaCorr-rotCorr)
+    particlesTargetVelocities[3]=thrust*(1+alphaCorr-betaCorr+rotCorr)
+    particlesTargetVelocities[4]=thrust*(1+alphaCorr+betaCorr-rotCorr)
+    
+    -- Send the desired motor velocities to the 4 rotors:
+    for i=1,4,1 do
+        sim.setScriptSimulationParameter(propellerScripts[i],'particleVelocity',particlesTargetVelocities[i])
+    end
+
+
+
+
+
+
+        --xPos = -2.3
+       -- yPos = 2.3
+        --zPos = 1.2080e-2
+        --yPos1 = yPos
+
+    ---function changePosition()
+       -- position={xPos,yPos,zPos}
+        --sim.setObjectPosition(targetObj,-1,position)
+        --if (zPos<20.000e-1) then
+          --  zPos = zPos + 1.000e-1
+            --changePosition()
+        --end
+        --if (yPos<13.9514e-1) then
+         --   yPos = yPos + 1.0000e-1
+           -- changePosition()
+        --end
+   -- end
+
+    --changePosition()
+
+    --zPos = 1.0000e-1
+    --position={xPos,yPos,zPos}
+
+
+--simTime=sim.getSimulationTime()
+
+--if (simTime>0) and (simTime<7) then
+        -- do something during simulation time 0-7
+  --  sim.setStringSignal("fromRobot1",yPos1)
+    --else
+        -- do something always, except during simulation time between 0 and 7
+    --zPos = 1.0000e-1
+    --position={xPos,yPos,zPos}
+    --sim.setObjectPosition(targetObj,-1,position)
+
+--end
+
+
+
+
+    function sitDown()
+        sim.setObjectPosition(targetObj,-1,{-2.3, 2.3, 0})
+        goback=1
+
+    end
+
+    function goHome()
+            y=0
+            x=0
+        newPos2 = sim.getObjectPosition(targetObj,-1)
+--print(newPos2)
+        if(newPos2[1]>-2)then
+            x=-0.3
+            y=0
+            if(newPos2[2]<-3)then
+                y=0.2
+            end
+        elseif(newPos2[1]<=-2 and newPos2[2]<2.3)then
+            x=0
+            y=0.3
+            if(newPos2[1]<-3)then
+                x=0.2
+            end
+        else
+            y=0
+            x=0
+        end
+
+        if(x~=0 or y~=0) then
+            
+            position = {x,y,z}
+            sim.setObjectPosition(targetObj,d,position)
+        elseif(newPos2[1]<-1.3 and newPos2[2]>1.1)then
+            simTime3 = sim.getSimulationTime()--timestamp before rush to home
+            sim.setObjectPosition(targetObj,-1,coordcopter)---GOHOME(1)
+            stopsit = 1
+            endsit2=0
+        end
+    end
+
+    function changePosition(type)
+    newPos = sim.getObjectPosition(targetObj,-1)
+            if (newPos[1]<targ1[1]) then
+                   if(targ1[1]<=-1.8) then
+                        x=0.1
+                   elseif(targ1[1]==2.1 and targ1[2]<=-1.8)then
+                        x=0.5
+                   elseif(targ1[2]<=-0.35) then
+                        if(targ1[1]<=-0.8) then
+                            x=0.1
+                        elseif(targ1[1]<=0.1)then
+                            x=0.25
+                        else
+                            x=0.4
+                        end
+                   elseif(targ1[2]==0.1 and targ1[1]>=0.6)then
+                        x=0.4
+                    elseif(targ1[1]==2.1)then
+                        if(targ1[2]==0.6)then
+                            x=0.4
+                        else
+                            x=0.6
+                        end
+                    elseif(targ1[1]==1.8)then
+                        x=0.6
+                    elseif(targ1[1]<=1.1 and targ1[1]>=0.6 and targ1[2]<=1.8)then
+                        x=0.6
+                    else    
+                        x=0.4
+                        
+                   end
+            else
+                x=0
+            end
+            if (newPos[2]>targ1[2]) then
+                   if(targ1[1]<=-0.8 and targ1[2]>=1.1) then
+                        y=-0.3
+                   elseif(targ1[2] == 1.8 and targ1[1]==2.1)or(targ1[2]==1.1 and targ1[1]==-0.35)or(targ1[2]==0.6 and targ1[1]<=-1.3)then
+                        y=-0.3
+                   elseif(targ1[1]==2.1 and targ1[2]<=-0.35 and targ1[2]>=-0.8)then
+                        y=-0.5
+                    elseif(targ1[2]>=1.8)then
+                        if(targ1[2]==1.8 and targ1[1]==1.8)then
+                            y=-0.4
+                        else
+                            y=-0.1
+                        end
+                    elseif(targ1[2]>=0.1 and targ1[1]>=0.1)then
+                        if(targ1[2]==0.1 and targ1[1]==0.1)then
+                            y=-0.6
+                        else
+                            y=-0.4
+                        end
+                    elseif(targ1[1]==1.8 and targ1[2]==-0.8) or (targ1[1]==1.8 and targ1[2]==-0.35)then
+                        y=-0.4
+
+                   else
+                        y=-0.6
+                   end
+            else
+                y=0
+            end
+            if(newPos[1]<targ1[1] or newPos[2]>targ1[2]) and(en~=1 or en2~=1) then
+                position = {x,y,z}
+                sim.setObjectPosition(targetObj,d,position)
+            end
+    end
+
+  
+    if(testdrawing~=1)then
+
+            x=0
+            y=0
+            z=0
+            simTime3 = 0
+            simTime4 = 0
+            energy = 50
+
+	lineContainer=sim.addDrawingObject(sim.drawing_lines,1,0,-1,9999,{0,0,55})
+	lineContainer2=sim.addDrawingObject(sim.drawing_lines,1,0,-1,9999,{55,0,0})
+    print("===================")
+
+    local f = io.open("div.txt", "a")
+    f:write(string.format("\n===================\n"))
+    f:close()
+
+
+        targets={{2.1,-2.2},{1.8,-1.3},{0.1,1.8},{2.1,0.6},{-2.3,-1.3},
+{-1.3,0.1},{-0.35,-0.35},{1.1,-2.2},{-0.8,-1.8},{0.6,2.3}}
+
+    sim.setStringSignal("fromRobot1",sim.packTable(targets))
+
+    coordinates = {-1.8, 2.2, 1.5}--default target coordinates
+    coordcopter = {-2.3, 2.3, 1.5}
+
+
+    targContainer=sim.addDrawingObject(sim.drawing_triangles,20,0,-1,9999,{0,55,0})
+	rectContainer=sim.addDrawingObject(sim.drawing_triangles,20,0,-1,9999,{0,22,55})
+    tDraw = {}
+    for i=1,10,1 do
+        tDraw[i]={targets[i][1],targets[i][2]-0.1,0,targets[i][1]-0.1,targets[i][2],0,targets[i][1]+0.1,targets[i][2],0}
+    end
+    local rect={-2.5, 2.5, 0,-2.5, 2, 0,-1, 2, 0}
+    local rect2={-2.5, 2.5, 0,-1, 2.5, 0,-1, 2, 0}
+    local rect3={-1.5, 2, 0,-2.5, 2, 0,-1.5, 1.5, 0}
+    local rect4={-1.5, 1.5, 0,-2.5, 2, 0,-2.5, 1.5, 0}
+	sim.addDrawingObjectItem(rectContainer,rect)
+    sim.addDrawingObjectItem(rectContainer,rect2)
+    sim.addDrawingObjectItem(rectContainer,rect3)
+    sim.addDrawingObjectItem(rectContainer,rect4)
+    for i=1,10,1 do
+        sim.addDrawingObjectItem(targContainer,tDraw[i])
+    end
+
+    checkChoosenTargets = {0,0,0,0,0}
+
+    res1={}
+    res2={}
+
+    distance={}
+
+    testdrawing=1
+    end
+    --targ1 = targets[1]
+
+
+
+    simTime=sim.getSimulationTime()
+    if (simTime>4) and (simTime<300) then
+	-- do something during simulation time 5-8
+   
+        newPos = sim.getObjectPosition(targetObj,-1)
+        if(newPos[1]<targ1[1] or newPos[2]>targ1[2]) and(en~=1) then
+            simTime2=sim.getSimulationTime()--target is nearby, doing timestamp
+        changePosition(1)
+        else 
+            if(en~=1) then
+            en=1
+            position = {targ1[1],targ1[2],0}
+            sim.setObjectPosition(targetObj,-1,position)         
+            end
+        end
+            if(en==1)then
+                --sit for 3 sec
+                if (simTime>simTime2+3) and (simTime<simTime2+7) then
+                    position = {targ1[1],targ1[2],coordinates[3]}
+                    sim.setObjectPosition(targetObj,-1,position)
+                    endsit=1
+                    
+                else
+                    if(endsit==1)then
+                        if(stopsit~=1)then
+                            --sim.setObjectPosition(targetObj,-1,coordcopter)---GOHOME(1)
+                            goHome()
+                            --stopsit = 1
+                        end
+                        if (simTime>simTime3+4) and (simTime<simTime3+8) and (simTime3~=0) then---4sec for rushing
+                            sitDown()
+
+                        else
+                        --rushing
+                            if(goback==1)then
+                                sim.setObjectPosition(targetObj,-1,coordcopter)
+                                goback=0
+                                simTime4=sim.getSimulationTime()--timestamp before second target
+                                local line={coordcopter[1], coordcopter[2], 0.1,targ1[1],targ1[2],0.1}
+                                sim.addDrawingObjectItem(lineContainer,line)
+                                    if(giveResults~=1) and (showRes==1)then
+                                        print(string.format("Q1:"))
+                                        print(string.format("Energy per target: %d",(50-energy)/2))
+                                        print(string.format("Targets number: %d",2))
+                                        print(string.format("Targets complete: %d",2))
+                                        print(("-------"))
+                                        giveResults = 1
+
+                                        local f = io.open("div.txt", "a")
+                                        f:write(string.format("Q1:"))
+                                        f:write(string.format("Energy per target: %d ;",(50-energy)/2))
+                                        f:write(string.format("Targets number: %d  ;  ",2))
+                                        f:write(string.format("Targets complete: %d  ;\n",2))
+                                        f:close()
+                                    end                                
+
+                            end
+                            if (simTime>simTime4+3) and (simTime<simTime4+200) and (simTime4~=0) then--3sec for stand up
+-----------------------
+                                if(testDrawLine2 ~=1)then
+                                    --targ1={-0.35,1.8}---SECOND TARGET
+                                    turn=1
+                                    checkR={}
+                                    checkR[1] = sim.getStringSignal("R2ChooseTarg")
+                                    checkR[2] = sim.getStringSignal("R3ChooseTarg")
+                                    checkR[3] = sim.getStringSignal("R4ChooseTarg")
+                                    checkR[4] = sim.getStringSignal("R5ChooseTarg")
+                                    for i=1,5,1 do
+                                        if checkR[i] == "1" then
+                                            turn = turn+1
+                                        end
+                                    end
+
+                                    for i=1,4,1 do
+                                    if(endsearch~=1)then
+                                        if(turn == i)then
+                                            
+                                            sim.setStringSignal("R1ChooseTarg",1)
+                                            endsearch=1
+                                            targ1=res3[i]
+                                            energy = energy-distance[i+5]
+                                        end
+                                    end
+                                    end
+                                    if(turn>=5)then
+                                    targ1 = res3[9]
+                                    local f = io.open("div.txt", "a")
+                                        f:write(string.format("Q1:"))
+                                        f:write(string.format("Energy per target: %d ;",(50-energy)))
+                                        f:write(string.format("Targets number: %d  ;  ",2))
+                                        f:write(string.format("Targets complete: %d  ;\n",1))
+                                        f:close()
+                                    end
+                                    --newPos = sim.getObjectPosition(targetObj,-1)
+                                    
+                                    testDrawLine2 = 1
+                                end
+                                if(newPos[1]<targ1[1] or newPos[2]>targ1[2]) and(en2~=1) then
+                                    changePosition(1)
+                                    simTime5=sim.getSimulationTime()
+                                else
+                                    if(en2~=1)then
+                                    en2=1
+                                    position = {targ1[1],targ1[2],0}
+                                    sim.setObjectPosition(targetObj,-1,position) 
+                                    end        
+                                end                             
+                                if(en2==1)then
+                                --sit for 3 sec
+                                if (simTime>simTime5+3) and (simTime<simTime5+7) then
+                                    position = {targ1[1],targ1[2],coordinates[3]}
+                                    sim.setObjectPosition(targetObj,-1,position)
+                                    endsit2=1
+
+                                    
+                                    --simTime3 = sim.getSimulationTime()--timestamp before rush to home
+                                else
+                                    if(endsit2==1)then
+                                        showRes=1
+                                        goHome()
+                                       --sim.setObjectPosition(targetObj,-1,coordcopter)---GOHOME(2)
+                                     end
+
+                                end
+                                end
+
+                            else
+
+                            end
+
+                        end
+                    end
+                end
+                
+            end
+     else
+        -- do something always, except during simulation time between 5 and 200
+        for i=1,10,1 do
+                test2 = math.ceil((targets[i][1]-coordinates[1])^2 + (targets[i][2]-coordinates[2])^2)
+                distance[i]=test2
+                table.sort(distance)
+                while(res1[test2]~=nil)do
+                    test2=test2+1
+                end
+                res1[test2] = targets[i]
+                --print(distance)
+                ik=i
+         end
+            if(ik>=10)then
+                for l=1,100,1 do
+                    if(res1[l]~=nil)then
+                        table.insert(res2,res1[l])
+                    end
+                    id=l
+                end
+            end
+            if(id>=10)then
+
+                    if(testDrawLine ~= 1)then
+                        --targ1=res2[1]--choose 1-5 (from closest targets to base)
+                        --targ1={0.6,0.6}
+
+                        turn1=1
+                        checkR={}
+                        checkR[1] = sim.getStringSignal("R2ChooseTarg1")
+                        checkR[2] = sim.getStringSignal("R3ChooseTarg1")
+                        checkR[3] = sim.getStringSignal("R4ChooseTarg1")
+                        checkR[4] = sim.getStringSignal("R5ChooseTarg1")
+                        checkR[5] = sim.getStringSignal("R6ChooseTarg1")
+
+                        for i=1,6,1 do
+                            if checkR[i] == "1" then
+                                turn1 = turn1+1
+                            end
+                        end
+
+                        for i=1,6,1 do
+                        if(endsearch1~=1)then
+                            if(turn1 == i)then
+                                
+                                sim.setStringSignal("R1ChooseTarg1",1)
+                                endsearch1=1
+                                targ1=res2[i]
+                                energy = energy-distance[i]
+                            end
+                        end
+                        end
+
+
+
+
+                        --energy = energy-distance[1]
+                        testDrawLine = 1
+                        res3={}-- last 5 target in the new array
+                        for i =1,4,1 do
+                           res3[i]=res2[6+i] 
+                        end
+                    end
+                
+            end
+
+    end
+
+end 
